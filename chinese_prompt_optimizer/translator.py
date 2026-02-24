@@ -27,6 +27,10 @@ from typing import Dict, Optional
 
 from deep_translator import GoogleTranslator
 
+from .logging_config import get_logger
+
+_log = get_logger("translator")
+
 # Sentence-ending punctuation used to split long texts into chunks.
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 
@@ -96,6 +100,7 @@ class Translator:
             raise ValueError("Input text must not be empty.")
         merged = {**self.glossary, **(extra_glossary or {})}
         protected, placeholders = self._protect_terms(text, merged)
+        _log.debug("en→zh: %d glossary terms protected.", len(placeholders))
         translated = self._translate_sentences(protected, self._en_to_zh)
         return self._restore_terms(translated, placeholders, merged)
 

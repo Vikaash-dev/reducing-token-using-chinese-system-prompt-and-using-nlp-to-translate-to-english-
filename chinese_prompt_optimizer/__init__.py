@@ -15,6 +15,7 @@ and are automatically integrated into :class:`ChinesePromptOptimizer`.
 """
 
 from .anti_hallucination import HallucinationGuard
+from .logging_config import get_logger, setup_logging
 from .translator import Translator
 from .optimizer import ChinesePromptOptimizer
 from .providers import PROVIDER_REGISTRY, ProviderConfig, get_provider, list_providers
@@ -22,6 +23,8 @@ from .utils import count_tokens, token_savings_report, plot_token_comparison
 
 __all__ = [
     "HallucinationGuard",
+    "get_logger",
+    "setup_logging",
     "Translator",
     "ChinesePromptOptimizer",
     "PROVIDER_REGISTRY",

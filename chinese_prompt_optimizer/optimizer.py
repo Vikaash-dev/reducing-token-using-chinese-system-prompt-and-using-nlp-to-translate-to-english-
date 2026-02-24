@@ -28,8 +28,11 @@ from typing import Any, Dict, List, Optional
 import litellm
 
 from .anti_hallucination import HallucinationGuard
+from .logging_config import get_logger
 from .translator import Translator
 from .utils import count_tokens, token_savings_report
+
+_log = get_logger("optimizer")
 
 
 class ChinesePromptOptimizer:
@@ -163,6 +166,7 @@ class ChinesePromptOptimizer:
             raise ValueError("user_message must not be empty.")
 
         # 1. Translate system prompt to Chinese
+        _log.debug("Translating system prompt to Chinese (%d chars).", len(system_prompt))
         chinese_system_prompt = self._translator.english_to_chinese(
             system_prompt, extra_glossary=extra_glossary
         )
@@ -190,8 +194,10 @@ class ChinesePromptOptimizer:
         )
 
         # 5. Call LLM at enforced low temperature
+        _log.debug("Calling LiteLLM: model=%s temperature=%.2f", self.model, self.temperature)
         raw = self._call_litellm(messages)
         raw_content: str = raw.choices[0].message.content or ""
+        _log.debug("Response received (%d chars).", len(raw_content))
 
         # 6. Translate response back to English
         if self.translate_response:
