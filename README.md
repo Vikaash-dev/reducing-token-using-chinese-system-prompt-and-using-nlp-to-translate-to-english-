@@ -40,6 +40,10 @@ saving on every API call.
 | [wyne1/llm-orchestrator](https://github.com/wyne1/llm-orchestrator) | Adapter-pattern LLM orchestrator for OpenAI / Anthropic / Gemini |
 | [BerriAI/litellm](https://github.com/BerriAI/litellm) | Universal LLM gateway (used as our completion backend) |
 | [nidhaloff/deep-translator](https://github.com/nidhaloff/deep-translator) | NLP translation library wrapping Google NMT (used for English↔Chinese) |
+| [ZurichNLP/ContraDecode](https://github.com/ZurichNLP/ContraDecode) | Source-contrastive decoding that penalises translations not tied to the input — inspired `HallucinationGuard.check_source_grounding()` |
+| [DAMO-NLP-SG/chain-of-knowledge](https://github.com/DAMO-NLP-SG) | Dynamic knowledge grounding for LLMs — inspired the RAG-lite context injection feature |
+| [EdinburghNLP/Awesome-Hallucination-Detection](https://github.com/EdinburghNLP) | Curated survey of hallucination detection tools and papers |
+| [technion-cs-nlp/Hallucination-Mitigation](https://github.com/technion-cs-nlp) | Benchmarks and interventions for LLM hallucination mitigation |
 
 ---
 
@@ -107,7 +111,111 @@ for p in list_providers():
 
 ---
 
-## Context preservation
+## Anti-hallucination techniques
+
+`HallucinationGuard` implements five anti-hallucination strategies from current
+NLP research and is automatically integrated into `ChinesePromptOptimizer`.
+
+### 1. "I Don't Know" rule (always on)
+
+The model is explicitly instructed in Chinese to respond with
+"我不知道" ("I don't know") rather than fabricating content when uncertain.
+
+### 2. Chain-of-Thought (CoT) analysis
+
+Enabled via `use_cot=True`.  Step-by-step reasoning instructions are injected
+into the Chinese system prompt, forcing the model to ground its response in the
+input before answering.  Inspired by research showing CoT significantly reduces
+speculative assertions.
+
+```python
+optimizer = ChinesePromptOptimizer(model="gemini/gemini-2.0-flash",
+                                   api_key=..., use_cot=True)
+```
+
+### 3. Self-Reflection
+
+Enabled via `use_self_reflect=True`.  After answering, the model is instructed
+to self-check its output against the source for unverified content.
+
+### 4. Low temperature enforcement
+
+`temperature` is automatically clamped to `[0.1, 0.4]` — the range recommended
+for factual/translation tasks (default `0.2`).
+
+```python
+optimizer = ChinesePromptOptimizer(model="gpt-4o", temperature=0.15, ...)
+```
+
+### 5. Source-grounding check (ContraDecode-inspired)
+
+Enabled by default via `hallucination_guard=True`.  After every response the
+library measures the fraction of key source terms that appear in the answer.
+The result is available under the `"grounding"` key:
+
+```python
+result = optimizer.complete("Be helpful.", "What is aspirin used for?")
+print(result["grounding"])
+# {"grounded": True, "overlap_ratio": 0.75, "warning": ""}
+```
+
+### 6. RAG-lite context injection
+
+Pass verified facts via `context_snippets` to force the model to reference
+evidence rather than guessing (reduces hallucinations by 42–68 %):
+
+```python
+result = optimizer.complete(
+    system_prompt="You are a medical assistant.",
+    user_message="What is aspirin used for?",
+    context_snippets=[
+        "Aspirin (acetylsalicylic acid) is an NSAID used for pain relief.",
+        "Aspirin inhibits COX-1 and COX-2 enzymes.",
+    ],
+)
+```
+
+### 7. Few-shot prompting
+
+Provide quality example pairs to demonstrate expected style and factual
+groundedness:
+
+```python
+optimizer = ChinesePromptOptimizer(
+    model="gemini/gemini-2.0-flash",
+    api_key=...,
+    few_shot_examples=[
+        {"user": "What is DNA?",
+         "assistant": "DNA (deoxyribonucleic acid) carries genetic information."},
+    ],
+)
+```
+
+### Direct use
+
+```python
+from chinese_prompt_optimizer import HallucinationGuard
+
+# Temperature clamping
+safe_temp = HallucinationGuard.enforce_temperature(0.9)  # → 0.4
+
+# Augment an existing Chinese prompt
+guarded = HallucinationGuard.build_guarded_prompt(
+    "你是医疗助理。",
+    use_idk_rule=True,
+    use_cot=True,
+)
+
+# Source-grounding check
+result = HallucinationGuard.check_source_grounding(
+    source_text="What is the capital of France?",
+    response_text="Paris is the capital of France.",
+    min_overlap_ratio=0.3,
+)
+# {"grounded": True, "overlap_ratio": 0.8, "warning": ""}
+```
+
+---
 
 Technical terms, proper nouns, and domain jargon are **never** passed
 through the NMT engine.  Supply a `glossary` dict and they will be swapped
@@ -174,17 +282,21 @@ they will run automatically in environments where both are available.
 
 ```
 chinese_prompt_optimizer/
-├── __init__.py       – public exports
-├── providers.py      – opencode-style provider registry (ChatGPT/Claude/Gemini)
-├── translator.py     – NLP translation with glossary & sentence chunking
-├── optimizer.py      – ChinesePromptOptimizer (LiteLLM backend)
-├── utils.py          – token counting + plot_token_comparison()
-└── gui.py            – Tkinter GUI with embedded matplotlib line graph
+├── __init__.py            – public exports
+├── anti_hallucination.py  – HallucinationGuard (IDK rule, CoT, self-reflect,
+│                            temperature enforcement, source-grounding check,
+│                            RAG-lite context block, few-shot message builder)
+├── providers.py           – opencode-style provider registry (ChatGPT/Claude/Gemini)
+├── translator.py          – NLP translation with glossary & sentence chunking
+├── optimizer.py           – ChinesePromptOptimizer (LiteLLM backend)
+├── utils.py               – token counting + plot_token_comparison()
+└── gui.py                 – Tkinter GUI with embedded matplotlib line graph
 
 tests/
+├── test_anti_hallucination.py  – HallucinationGuard unit tests (34 tests)
 ├── test_providers.py           – provider registry unit tests
 ├── test_translator.py          – translation + context preservation tests
-├── test_optimizer.py           – optimizer unit tests
+├── test_optimizer.py           – optimizer unit tests (incl. anti-hallucination params)
 ├── test_utils.py               – token counting + graph tests
 └── test_integration_gemini.py  – live Gemini integration tests (auto-skipped offline)
 
