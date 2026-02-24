@@ -6,10 +6,13 @@ Core class: ChinesePromptOptimizer
 Flow
 ~~~~
 1. User provides an English system prompt and a user message.
-2. The system prompt is translated to Chinese (token-dense).
+2. The system prompt is translated to Chinese (token-dense).  Terms in the
+   caller-supplied *glossary* are shielded from the NMT engine via placeholder
+   substitution so that contextual meaning is never lost.
 3. LiteLLM sends both the Chinese system prompt and the English user
    message to the configured provider.
-4. The (Chinese) LLM response is translated back to English via NLP.
+4. The (Chinese) LLM response is translated back to English via NLP,
+   restoring any glossary terms to their English originals.
 5. Optionally a token-savings report is returned alongside the answer.
 """
 
@@ -34,6 +37,19 @@ class ChinesePromptOptimizer:
     translate_response:
         When *True* (default) the model's response is translated from
         Chinese back to English so the caller always receives English.
+    glossary:
+        Optional dict mapping English terms (technical jargon, proper nouns,
+        acronyms) to their preferred Chinese equivalents – or to themselves
+        if they should remain unchanged.  These terms are **never** passed
+        through the NMT engine, preserving contextual meaning exactly.
+
+        Example::
+
+            glossary={
+                "HIPAA": "HIPAA",        # keep acronym intact
+                "LiteLLM": "LiteLLM",   # brand name
+                "retrieval-augmented generation": "检索增强生成",
+            }
     api_key:
         Optional API key forwarded to LiteLLM.  Can also be set via the
         appropriate environment variable (``OPENAI_API_KEY``, etc.).
@@ -48,6 +64,7 @@ class ChinesePromptOptimizer:
         self,
         model: str = "gpt-3.5-turbo",
         translate_response: bool = True,
+        glossary: Optional[Dict[str, str]] = None,
         api_key: Optional[str] = None,
         api_base: Optional[str] = None,
         **litellm_kwargs: Any,
@@ -57,7 +74,7 @@ class ChinesePromptOptimizer:
         self.api_key = api_key
         self.api_base = api_base
         self._litellm_kwargs = litellm_kwargs
-        self._translator = Translator()
+        self._translator = Translator(glossary=glossary)
 
     # ------------------------------------------------------------------
     # Public API
@@ -68,6 +85,7 @@ class ChinesePromptOptimizer:
         system_prompt: str,
         user_message: str,
         return_savings: bool = False,
+        extra_glossary: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """Send a completion request with a Chinese-optimised system prompt.
 
@@ -75,27 +93,33 @@ class ChinesePromptOptimizer:
         ----------
         system_prompt:
             English system prompt.  It will be translated to Chinese before
-            being sent to the model to reduce token usage.
+            being sent to the model to reduce token usage.  Terms in the
+            instance-level *glossary* (and *extra_glossary* if provided) are
+            preserved verbatim so no contextual meaning is lost.
         user_message:
             The end-user's message (sent as-is in English).
         return_savings:
             If *True*, include a ``savings`` key in the returned dict that
             describes how many tokens were saved by using Chinese.
+        extra_glossary:
+            Per-call glossary additions merged with the instance-level one.
 
         Returns
         -------
         dict with keys:
-        - ``response``   – English answer (str)
+        - ``response``     – English answer (str)
         - ``raw_response`` – raw LiteLLM ``ModelResponse`` object
-        - ``savings``    – token-savings dict (only when *return_savings* is
-                           True)
+        - ``savings``      – token-savings dict (only when *return_savings* is
+                             True)
         """
         if not system_prompt or not system_prompt.strip():
             raise ValueError("system_prompt must not be empty.")
         if not user_message or not user_message.strip():
             raise ValueError("user_message must not be empty.")
 
-        chinese_system_prompt = self._translator.english_to_chinese(system_prompt)
+        chinese_system_prompt = self._translator.english_to_chinese(
+            system_prompt, extra_glossary=extra_glossary
+        )
 
         messages = self._build_messages(chinese_system_prompt, user_message)
         raw = self._call_litellm(messages)
@@ -103,7 +127,9 @@ class ChinesePromptOptimizer:
         raw_content: str = raw.choices[0].message.content or ""
 
         if self.translate_response:
-            english_response = self._translator.chinese_to_english(raw_content)
+            english_response = self._translator.chinese_to_english(
+                raw_content, extra_glossary=extra_glossary
+            )
         else:
             english_response = raw_content
 
@@ -122,6 +148,7 @@ class ChinesePromptOptimizer:
     def count_system_prompt_tokens(
         self,
         system_prompt: str,
+        extra_glossary: Optional[Dict[str, str]] = None,
     ) -> Dict[str, int]:
         """Preview token counts for *system_prompt* in both languages.
 
@@ -131,12 +158,16 @@ class ChinesePromptOptimizer:
         ----------
         system_prompt:
             English system prompt to analyse.
+        extra_glossary:
+            Per-call glossary additions merged with the instance-level one.
 
         Returns
         -------
         dict with ``english_tokens`` and ``chinese_tokens``.
         """
-        chinese = self._translator.english_to_chinese(system_prompt)
+        chinese = self._translator.english_to_chinese(
+            system_prompt, extra_glossary=extra_glossary
+        )
         return {
             "english_tokens": count_tokens(system_prompt, self.model),
             "chinese_tokens": count_tokens(chinese, self.model),
