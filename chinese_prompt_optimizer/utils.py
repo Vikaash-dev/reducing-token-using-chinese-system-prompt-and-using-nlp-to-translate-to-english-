@@ -19,10 +19,10 @@ except ImportError:
 def _approx_tokens(text: str) -> int:
     """Character-based token approximation used when tiktoken is unavailable.
 
-    English words average ~1.3 tokens; CJK characters each count as ~1 token.
+    English text averages ~3.8 characters per token (5 chars/word × 1.3 tok/word).
     This heuristic is sufficient to show relative savings comparisons.
     """
-    return max(1, len(text) // 4)
+    return max(1, len(text) * 10 // 38)
 
 
 def count_tokens(text: str, model: str = "gpt-3.5-turbo") -> int:

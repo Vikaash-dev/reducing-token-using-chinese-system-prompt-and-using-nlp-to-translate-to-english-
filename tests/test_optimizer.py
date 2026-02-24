@@ -171,10 +171,13 @@ def test_complete_passes_api_key_and_base():
 
 
 def test_count_system_prompt_tokens(optimizer):
-    with patch.object(
-        optimizer._translator,
-        "english_to_chinese",
-        return_value="你是助手。",
+    with (
+        patch.object(
+            optimizer._translator,
+            "english_to_chinese",
+            return_value="你是助手。",
+        ),
+        patch("chinese_prompt_optimizer.utils._TIKTOKEN_AVAILABLE", False),
     ):
         counts = optimizer.count_system_prompt_tokens("You are a helpful assistant.")
 

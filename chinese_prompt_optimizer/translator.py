@@ -141,6 +141,7 @@ class Translator:
         """Replace glossary keys in *text* with opaque placeholders.
 
         Returns the modified text and a mapping of placeholder → replacement.
+        Regex patterns are compiled once per term for efficiency.
         """
         if not glossary:
             return text, {}
@@ -149,7 +150,6 @@ class Translator:
             if not term:
                 continue
             ph = _PLACEHOLDER.format(idx=idx)
-            # Case-sensitive whole-word match to avoid partial replacements.
             pattern = re.compile(re.escape(term))
             if pattern.search(text):
                 text = pattern.sub(ph, text)

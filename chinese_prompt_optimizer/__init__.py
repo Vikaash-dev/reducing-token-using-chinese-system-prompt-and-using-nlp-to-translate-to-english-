@@ -5,17 +5,25 @@ Reduce LLM token usage by converting English system prompts to Chinese
 (which is more token-dense), then translating Chinese responses back to
 English using NLP-based machine translation.
 
-Uses LiteLLM as a unified gateway so any provider (OpenAI, Anthropic,
-Google, Mistral, local Ollama, etc.) is supported out of the box.
+Uses LiteLLM as a unified gateway so any provider (OpenAI/ChatGPT,
+Anthropic/Claude, Google/Gemini, local Ollama, etc.) is supported out of
+the box.  A Tkinter GUI with an embedded token-comparison line graph is
+available via :func:`gui.launch`.
 """
 
 from .translator import Translator
 from .optimizer import ChinesePromptOptimizer
-from .utils import count_tokens, token_savings_report
+from .providers import PROVIDER_REGISTRY, ProviderConfig, get_provider, list_providers
+from .utils import count_tokens, token_savings_report, plot_token_comparison
 
 __all__ = [
     "Translator",
     "ChinesePromptOptimizer",
+    "PROVIDER_REGISTRY",
+    "ProviderConfig",
+    "get_provider",
+    "list_providers",
     "count_tokens",
     "token_savings_report",
+    "plot_token_comparison",
 ]
