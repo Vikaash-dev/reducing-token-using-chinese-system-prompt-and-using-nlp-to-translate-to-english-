@@ -61,7 +61,7 @@ def _truncate(text: str, max_len: int = 70) -> str:
     return text[:max_len] + "…" if len(text) > max_len else text
 
 
-
+translator = Translator()
 reports = []
 
 print("=== Token Savings Report ===")
