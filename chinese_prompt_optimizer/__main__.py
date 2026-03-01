@@ -110,6 +110,19 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Print result as JSON (headless mode only).",
     )
     p.add_argument(
+        "--sot",
+        action="store_true",
+        help=(
+            "Enable Skeleton-of-Thought (SoT) mode: generate a concise skeleton "
+            "outline first, then expand each point in parallel for faster responses."
+        ),
+    )
+    p.add_argument(
+        "--sot-sequential",
+        action="store_true",
+        help="Expand SoT skeleton points sequentially instead of in parallel (requires --sot).",
+    )
+    p.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -155,6 +168,8 @@ def _run_headless(args: argparse.Namespace) -> None:
         use_cot=args.cot,
         use_self_reflect=args.self_reflect,
         hallucination_guard=True,
+        use_sot=args.sot,
+        sot_parallel=not args.sot_sequential,
     )
     result = optimizer.complete(
         system_prompt=args.system_prompt,
@@ -170,6 +185,7 @@ def _run_headless(args: argparse.Namespace) -> None:
                     "response": result["response"],
                     "savings": result.get("savings"),
                     "grounding": result.get("grounding"),
+                    "skeleton": result.get("skeleton"),
                 },
                 indent=2,
                 ensure_ascii=False,
@@ -177,6 +193,11 @@ def _run_headless(args: argparse.Namespace) -> None:
         )
     else:
         print(f"\nResponse:\n{result['response']}\n")
+        if result.get("skeleton"):
+            print("Skeleton outline:")
+            for i, pt in enumerate(result["skeleton"], 1):
+                print(f"  {i}. {pt}")
+            print()
         sv = result.get("savings", {})
         print(
             f"Token savings: {sv.get('tokens_saved', '?')} tokens "

@@ -19,6 +19,7 @@ from .logging_config import get_logger, setup_logging
 from .translator import Translator
 from .optimizer import ChinesePromptOptimizer
 from .providers import PROVIDER_REGISTRY, ProviderConfig, get_provider, list_providers
+from .sot import SkeletonOfThought
 from .utils import count_tokens, token_savings_report, plot_token_comparison
 
 __all__ = [
@@ -31,6 +32,7 @@ __all__ = [
     "ProviderConfig",
     "get_provider",
     "list_providers",
+    "SkeletonOfThought",
     "count_tokens",
     "token_savings_report",
     "plot_token_comparison",

@@ -29,6 +29,7 @@ import litellm
 
 from .anti_hallucination import HallucinationGuard
 from .logging_config import get_logger
+from .sot import SkeletonOfThought
 from .translator import Translator
 from .utils import count_tokens, token_savings_report
 
@@ -80,6 +81,19 @@ class ChinesePromptOptimizer:
         Optional list of ``{"user": "...", "assistant": "..."}`` dicts
         providing quality translation examples (few-shot prompting).  These
         are inserted between the system message and the user's actual message.
+    use_sot:
+        When *True*, use the Skeleton-of-Thought (SoT) two-stage pipeline
+        instead of a single LLM call.  Stage 1 generates a concise skeleton
+        outline; Stage 2 expands each point independently (in parallel when
+        *sot_parallel* is *True*) for up to 2.39× speed-up.  Based on the
+        research from *imagination-research/sot* and *SimonAytes/SoT*.
+        Note: SoT may increase total token cost due to multiple API calls
+        but significantly reduces perceived response latency.
+    sot_parallel:
+        When *True* (default) skeleton points are expanded concurrently via
+        a thread pool in SoT mode.  Set to *False* for sequential expansion
+        (useful for debugging or rate-limited APIs).  Only relevant when
+        *use_sot* is *True*.
     api_key:
         Optional API key forwarded to LiteLLM.  Can also be set via the
         appropriate environment variable (``OPENAI_API_KEY``, etc.).
@@ -100,6 +114,8 @@ class ChinesePromptOptimizer:
         use_self_reflect: bool = False,
         hallucination_guard: bool = True,
         few_shot_examples: Optional[List[Dict[str, str]]] = None,
+        use_sot: bool = False,
+        sot_parallel: bool = True,
         api_key: Optional[str] = None,
         api_base: Optional[str] = None,
         **litellm_kwargs: Any,
@@ -111,6 +127,8 @@ class ChinesePromptOptimizer:
         self.use_self_reflect = use_self_reflect
         self.hallucination_guard = hallucination_guard
         self.few_shot_examples = few_shot_examples or []
+        self.use_sot = use_sot
+        self.sot_parallel = sot_parallel
         self.api_key = api_key
         self.api_base = api_base
         self._litellm_kwargs = litellm_kwargs
@@ -154,11 +172,16 @@ class ChinesePromptOptimizer:
         -------
         dict with keys:
 
-        - ``response``     – English answer (str)
-        - ``raw_response`` – raw LiteLLM ``ModelResponse`` object
-        - ``savings``      – token-savings dict (only when *return_savings*)
-        - ``grounding``    – source-grounding check result dict (only when
-                             *hallucination_guard* is ``True``)
+        - ``response``         – English answer (str)
+        - ``raw_response``     – raw LiteLLM ``ModelResponse`` object
+                                 (standard mode only; absent in SoT mode)
+        - ``savings``          – token-savings dict (only when *return_savings*)
+        - ``grounding``        – source-grounding check result dict (only when
+                                 *hallucination_guard* is ``True``)
+        - ``skeleton``         – list of skeleton bullet points (SoT mode only)
+        - ``expanded_points``  – list of expanded paragraph strings (SoT mode only)
+        - ``raw_skeleton``     – raw Stage-1 LiteLLM response (SoT mode only)
+        - ``raw_expansions``   – list of raw Stage-2 LiteLLM responses (SoT mode only)
         """
         if not system_prompt or not system_prompt.strip():
             raise ValueError("system_prompt must not be empty.")
@@ -193,11 +216,26 @@ class ChinesePromptOptimizer:
             guarded_prompt, effective_user_message
         )
 
-        # 5. Call LLM at enforced low temperature
-        _log.debug("Calling LiteLLM: model=%s temperature=%.2f", self.model, self.temperature)
-        raw = self._call_litellm(messages)
-        raw_content: str = raw.choices[0].message.content or ""
-        _log.debug("Response received (%d chars).", len(raw_content))
+        # 5. Call LLM at enforced low temperature (standard or SoT mode)
+        _log.debug("Calling LiteLLM: model=%s temperature=%.2f use_sot=%s",
+                   self.model, self.temperature, self.use_sot)
+        if self.use_sot:
+            sot = SkeletonOfThought(
+                model=self.model,
+                temperature=self.temperature,
+                parallel=self.sot_parallel,
+                api_key=self.api_key,
+                api_base=self.api_base,
+                **self._litellm_kwargs,
+            )
+            sot_result = sot.complete(guarded_prompt, effective_user_message)
+            raw_content: str = sot_result["response"]
+            _log.debug("SoT response assembled (%d chars, %d points).",
+                       len(raw_content), len(sot_result["skeleton"]))
+        else:
+            raw = self._call_litellm(messages)
+            raw_content = raw.choices[0].message.content or ""
+            _log.debug("Response received (%d chars).", len(raw_content))
 
         # 6. Translate response back to English
         if self.translate_response:
@@ -207,10 +245,19 @@ class ChinesePromptOptimizer:
         else:
             english_response = raw_content
 
-        result: Dict[str, Any] = {
-            "response": english_response,
-            "raw_response": raw,
-        }
+        if self.use_sot:
+            result: Dict[str, Any] = {
+                "response": english_response,
+                "raw_skeleton": sot_result["raw_skeleton"],
+                "raw_expansions": sot_result["raw_expansions"],
+                "skeleton": sot_result["skeleton"],
+                "expanded_points": sot_result["expanded_points"],
+            }
+        else:
+            result = {
+                "response": english_response,
+                "raw_response": raw,
+            }
 
         # 7. Source-grounding check (ContraDecode-inspired)
         if self.hallucination_guard:
